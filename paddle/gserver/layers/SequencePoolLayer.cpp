@@ -12,8 +12,8 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
 
-#include "SequencePoolLayer.h"
 #include "paddle/utils/Logging.h"
+#include "SequencePoolLayer.h"
 
 namespace paddle {
 
@@ -38,6 +38,10 @@ bool SequencePoolLayer::init(const LayerMap& layerMap,
     LOG(FATAL) << "Unknown trans_type: " << config_.trans_type();
   }
   setNeedSequenceInfo(false);
+
+  if (getType() == "maxk") {
+    topk_ = config_.topk();
+  }
   return true;
 }
 
@@ -55,18 +59,21 @@ void SequencePoolLayer::forward(PassType passType) {
   CHECK_EQ(starts->getData()[newBatchSize_], input.getBatchSize());
   CHECK_EQ(newBatchSize_, starts->getSize() - 1);
 
-  resetOutput(newBatchSize_, dim);
-
+  if (getType() == "maxk") {
+    resetOutput(newBatchSize_ * topk_, dim);  //  bs * topk
+  } else {
+    resetOutput(newBatchSize_, dim);  //  only one output
+  }
+  if (type_) {
+    CHECK(input.subSequenceStartPositions)
+      << "when trans_type = seq, input must hasSubseq";
+    output_.degradeSequence(input);
+  }
   /* If type_ = kNonSeq, both seq has or not has sub-seq degrade to a non-seq,
    * thus, in this case, output_ has no sequenceStartPositions.
    * If type_ = kSeq, seq has sub-seq degrades to a seq, thus, only in this
    * case, we should compute the new sequenceStartPositions.
   */
-  if (type_) {
-    CHECK(input.subSequenceStartPositions)
-        << "when trans_type = seq, input must hasSubseq";
-    output_.degradeSequence(input);
-  }
 }
 
 void SequencePoolLayer::backward(const UpdateCallback& callback) {

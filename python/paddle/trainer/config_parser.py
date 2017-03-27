@@ -2427,6 +2427,32 @@ class FeatMapExpandLayer(LayerBase):
         self.set_layer_size(self.get_input_layer(0).size * num_filters)
 
 
+@config_layer('maxk')
+class MaxKLayer(LayerBase):
+    def __init__(self,
+                 name,
+                 inputs,
+                 trans_type='non-seq',
+                 active_type='linear',
+                 topk=3,
+                 keep_order = False,
+                 device=None,
+                 bias=False,
+                 output_max_index=None):
+        super(MaxKLayer, self).__init__(
+            name, 'maxk', 0, inputs=inputs, device=device)
+        config_assert(len(self.inputs) == 1, 'MaxKLayer must have 1 input')
+        self.config.trans_type = trans_type
+        self.config.topk = topk
+        self.config.keep_order= keep_order
+        self.config.active_type = active_type
+        for input_index in xrange(len(self.inputs)):
+            input_layer = self.get_input_layer(input_index)
+            self.set_layer_size(input_layer.size)
+        self.create_bias_parameter(bias, self.config.size)
+        if output_max_index is not None:
+            self.config.output_max_index = output_max_index
+
 @config_layer('max')
 class MaxLayer(LayerBase):
     def __init__(self,

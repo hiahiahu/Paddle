@@ -441,6 +441,11 @@ message LayerConfig {
 
   // blank label used in ctc loss
   optional uint32 blank = 52 [default = 0];
+
+  // topk for maxk pooling
+  optional uint32 topk = 53;
+  optional bool keep_order = 54;
+
 }
 
 message EvaluatorConfig {

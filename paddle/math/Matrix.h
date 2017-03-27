@@ -984,6 +984,19 @@ public:
                                    IVector& index) {
     LOG(FATAL) << "Not implemeted";
   }
+  virtual void maxKSequenceForward(Matrix& input,
+                                     const IVector& sequence,
+                                     IVector& index, size_t topk,
+                                     bool keep_order,
+                                     int * output_sequence) {
+      LOG(FATAL) << "Not implemeted";
+    }
+
+  virtual void maxKSequenceBackward(Matrix& outputGrad,
+                                      const IVector& sequence,
+                                      IVector& index, size_t topk) {
+      LOG(FATAL) << "Not implemeted";
+    }
 
   /**
    * @code
@@ -1605,6 +1618,16 @@ public:
   void maxSequenceBackward(Matrix& outputGrad,
                            const IVector& sequence,
                            IVector& index);
+
+  void maxKSequenceForward(Matrix& input,
+                           const IVector& sequence,
+                           IVector& index, size_t topk,
+                           bool keep_order,
+                           int * output_sequence);
+
+  void maxKSequenceBackward(Matrix& outputGrad,
+                            const IVector& sequence,
+                            IVector& index, size_t topk);
 
   real* getRow(size_t row) { return BaseMatrix::rowBuf(row); }
   virtual real* getRowBuf(size_t row) { return getRow(row); }

@@ -27,7 +27,7 @@ limitations under the License. */
 #include "hl_table_apply.h"
 #include "hl_top_k.h"
 #include "paddle/utils/Logging.h"
-
+#include <queue>
 #include "paddle/utils/ThreadLocal.h"
 
 #include "SIMDFunctions.h"
@@ -2084,6 +2084,113 @@ void CpuMatrix::avgPoolBackward(Matrix& input,
       inData += outputH * outputW;
     }
   }
+}
+
+void CpuMatrix::maxKSequenceForward(Matrix& input,
+                                        const IVector& sequence,
+                                        IVector& index,
+                                        size_t topk,
+                                        bool keep_order,
+                                        int * output_sequence) {
+      CHECK(dynamic_cast<CpuMatrix*>(&input));
+      CHECK(dynamic_cast<const CpuIVector*>(&sequence));
+      CHECK(dynamic_cast<CpuIVector*>(&index));
+
+      real* outData = getData();
+      real* inputData = input.getData();
+      const int* starts = sequence.getData();
+      int* maxIndex = index.getData();
+      // size_t numSequences = getHeight();
+      size_t numSequences = getHeight() / topk;
+      size_t dim = getWidth();
+
+      CHECK_EQ(dim, input.getWidth());
+      CHECK_EQ(numSequences, sequence.getSize() - 1);
+      CHECK_EQ(starts[numSequences], (int)input.getHeight());
+      CHECK_EQ(numSequences * dim  * topk, index.getSize());
+
+      struct tmpPoint {
+          real value; int idx;
+      public:
+          tmpPoint(real value, int idx):value(value), idx(idx){}
+      };
+      auto f_value = [](tmpPoint a, tmpPoint b)
+         { return a.value <  b.value; };  // compare func for value
+      auto f_idx = [](tmpPoint a, tmpPoint b)
+         { return a.idx <  b.idx; };  // compare func for index
+      for (size_t sequenceId = 0; sequenceId < numSequences; ++sequenceId) {
+        int head_idx = starts[sequenceId] + 1;
+        for (size_t k = 0; k < dim; ++k) {
+          std::priority_queue<tmpPoint, std::vector<tmpPoint>,
+               decltype(f_value)> value_queue(f_value);
+          for (int insId = head_idx; insId < starts[sequenceId + 1];
+               ++insId) {
+            value_queue.push(tmpPoint(inputData[insId * dim + k], insId));
+          }
+          if (keep_order) {
+            std::priority_queue<tmpPoint, std::vector<tmpPoint>,
+                    decltype(f_idx)> order_queue(f_idx);
+            for (size_t j = 0; j < topk ; j++) {
+               if (!value_queue.empty()) {
+                 order_queue.push(value_queue.top());
+                 value_queue.pop();
+               } else {
+                 order_queue.push(tmpPoint(0., INT_MAX));  //  padding
+               }
+            }
+            for (size_t j = 0; j < topk ; j++) {
+              auto ex = order_queue.top();
+              outData[(sequenceId * topk + j) * dim + k] = ex.value;
+              maxIndex[(sequenceId * topk + j) * dim + k] = ex.idx;
+              order_queue.pop();
+            }
+          } else {
+            for (size_t j = 0; j < topk ; j++) {
+                  if (!value_queue.empty()) {
+                    auto ex = value_queue.top();
+                    outData[(sequenceId * topk + j) * dim + k] = ex.value;
+                    maxIndex[(sequenceId * topk + j) * dim + k] = ex.idx;
+                    value_queue.pop();
+                  } else {
+                    outData[(sequenceId * topk + j) * dim + k] = 0.;
+                    maxIndex[(sequenceId * topk + j) * dim + k] = INT_MAX;
+                }
+              }
+            }
+          }
+        output_sequence[sequenceId] = topk * sequenceId;  // start from 0
+      }
+      output_sequence[numSequences] = topk * numSequences;  //  the last one
+}
+void CpuMatrix::maxKSequenceBackward(Matrix& outputGrad,
+                                         const IVector& sequence,
+                                         IVector& index, size_t topk) {
+      CHECK(dynamic_cast<CpuMatrix*>(&outputGrad));
+      CHECK(dynamic_cast<const CpuIVector*>(&sequence));
+      CHECK(dynamic_cast<CpuIVector*>(&index));
+
+      real* inputGrad = getData();
+      real* outGrad = outputGrad.getData();
+      int* maxIndex = index.getData();
+      size_t dim = getWidth();
+      size_t numSequences = sequence.getSize() - 1;
+
+      CHECK_EQ(dim, outputGrad.getWidth());
+      CHECK_EQ(numSequences, outputGrad.getHeight() / topk);
+      CHECK_EQ(numSequences * dim * topk, index.getSize());
+
+      for (size_t sequenceId = 0; sequenceId < numSequences; ++sequenceId) {
+        // current sequence
+        for (size_t k = 0; k < dim; ++k) {
+          for (size_t j = 0; j < topk; j++) {
+            int insId = maxIndex[(sequenceId * topk + j) * dim + k];
+            if (insId < INT_MAX) {
+                inputGrad[insId * dim + k] +=
+                   outGrad[(sequenceId * topk + j) * dim + k];
+            }
+          }
+        }
+      }
 }
 
 /**
